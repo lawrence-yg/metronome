@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>节拍器</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+
+  :root{
+    color-scheme:light dark;
+    --pad:clamp(16px,3vw,28px);
+    --bg:#fafafa; --fg:#141416; --muted:#6b6b73; --line:#d2d2d7;
+    --accent:#1565d8; --dot:#8b8b94;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0c0d0f; --fg:#f2f2f3; --muted:#82828b; --line:#34373d;
+      --accent:#5aa9ff; --dot:#62656c;
+    }
+  }
+
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
+    font:400 16px/1.45 "PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,
+         BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    user-select:none; -webkit-user-select:none;
+    transition:background .25s ease, color .25s ease;
+  }
+
+  main{
+    height:100dvh; min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:clamp(20px,3.4vh,40px); padding:var(--pad);
+  }
+  /* 全屏时只留核心信息，控件整体缩小让位给数字 */
+  main.fs .stage{gap:clamp(4px,1vh,10px)}
+  main.fs #bpm{font-size:clamp(120px,30vmin,300px)}
+  main.fs .settings{opacity:.25}
+  main.fs .settings:hover{opacity:1}
+  main.fs .settings{transition:opacity .3s}
+
+  /* ---------- 大数字：可点按输入 / 拖动 / 滚轮 ---------- */
+  .stage{display:flex; flex-direction:column; align-items:center}
+  #bpm{
+    width:auto; min-width:3.4ch; size:3;
+    font-family:inherit;
+    font-size:clamp(92px,21vmin,210px);
+    font-weight:250; line-height:1;
+    letter-spacing:-.035em;
+    font-variant-numeric:tabular-nums;
+    text-align:center;
+    color:var(--fg);
+    background:transparent; border:0; border-bottom:1px dashed transparent;
+    outline:0; padding:0 2px 6px; margin:0;
+    caret-color:var(--accent);
+    cursor:text;
+    user-select:text; -webkit-user-select:text;
+    transition:border-color .18s ease, color .25s ease;
+  }
+  #bpm:hover{border-bottom-color:transparent}   /* 滑块已在下方提供速度反馈，无需再划线 */
+  #bpm::selection{background:color-mix(in srgb, var(--accent) 28%, transparent)}
+
+  /* ---------- 变速滑块：数字正下方，与数字双向同步 ---------- */
+  #bpmSlider{
+    -webkit-appearance:none; appearance:none;
+    width:min(430px,74vw); height:18px; margin:clamp(8px,1.4vh,16px) 0 0;
+    background:transparent; cursor:pointer;
+  }
+  #bpmSlider::-webkit-slider-runnable-track{height:2px; background:var(--line); border-radius:2px}
+  #bpmSlider::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none;
+    width:13px; height:13px; border-radius:50%;
+    background:var(--fg); border:none; margin-top:-5.5px;
+    transition:background .13s ease, transform .1s ease;
+  }
+  #bpmSlider:hover::-webkit-slider-thumb,
+  #bpmSlider:active::-webkit-slider-thumb{background:var(--accent)}
+  #bpmSlider:active::-webkit-slider-thumb{transform:scale(1.15)}
+  #bpmSlider:focus-visible{outline:none}
+  #bpmSlider:focus-visible::-webkit-slider-thumb{
+    box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+  #bpmSlider::-moz-range-track{height:2px; background:var(--line); border-radius:2px}
+  #bpmSlider::-moz-range-thumb{
+    width:13px; height:13px; border-radius:50%; background:var(--fg); border:none;
+    transition:background .13s ease, transform .1s ease;
+  }
+  #bpmSlider:hover::-moz-range-thumb,
+  #bpmSlider:active::-moz-range-thumb{background:var(--accent)}
+  #bpmSlider:focus-visible::-moz-range-thumb{
+    box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+
+  .bar{
+    height:1.3em; margin-top:clamp(10px,1.6vh,18px);
+    font-size:12.5px; letter-spacing:.08em; color:var(--muted);
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* ---------- 拍点：实心=重音(静态)，放大=正在响(瞬时) ---------- */
+  .dots{display:flex; gap:11px; align-items:center; justify-content:center; min-height:16px}
+  .dot{
+    width:9px; height:9px; border-radius:50%; padding:0;
+    border:1.5px solid var(--dot); background:transparent;
+    cursor:pointer; display:block;
+    transition:transform .12s cubic-bezier(.2,1.6,.4,1),
+               background .15s ease, border-color .15s ease;
+  }
+  .dot:hover{border-color:var(--muted)}
+  .dot.acc{background:var(--accent); border-color:var(--accent)}
+  .dot.on{transform:scale(1.6); border-color:var(--accent)}
+  .dot.acc.on{background:var(--accent)}
+  #bpm:focus-visible ~ .bar{color:var(--accent)}
+
+  /* ---------- 播放键 ---------- */
+  .play{
+    appearance:none; cursor:pointer; font:inherit; font-size:14px;
+    letter-spacing:.2em; text-indent:.2em;
+    border:1px solid var(--line); background:transparent; color:var(--fg);
+    padding:12px 40px; border-radius:999px;
+    transition:background .15s ease, border-color .15s ease, color .15s ease, transform .08s ease;
+  }
+  .play:hover{border-color:var(--muted)}
+  .play:active{transform:scale(.975)}
+  .play[data-on="1"]{background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:500}
+  .play[data-on="1"]:hover{filter:brightness(1.08)}
+
+  /* ---------- 设置行 ---------- */
+  .settings{display:flex; gap:clamp(8px,1.6vw,16px); align-items:center; justify-content:center; flex-wrap:wrap}
+  .f{display:flex; align-items:center; gap:6px}
+  .f i{font-style:normal; font-size:11.5px; letter-spacing:.06em; color:var(--muted)}
+  select,.chip{
+    appearance:none; font:inherit; font-size:12.5px; cursor:pointer;
+    color:var(--fg); background:transparent;
+    border:1px solid var(--line); border-radius:999px; padding:6px 12px;
+    transition:border-color .15s ease, color .15s ease, transform .08s ease;
+  }
+  select{
+    padding-right:26px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                     linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size:5px 5px,5px 5px; background-repeat:no-repeat;
+  }
+  option{background:var(--bg); color:var(--fg)}
+  select:hover,.chip:hover{border-color:var(--muted)}
+  select:active,.chip:active{transform:scale(.97)}
+  .chip{min-width:38px}
+
+  /* ---------- 节奏型：胶囊按钮 + 可展开的乐谱面板 ---------- */
+  .rhythm{position:relative; display:flex; flex-direction:column; align-items:center; gap:8px}
+  .pill{
+    position:relative; display:inline-flex; align-items:center; gap:8px;
+    appearance:none; cursor:pointer; font:inherit;
+    color:var(--fg); background:transparent;
+    border:1px solid var(--line); border-radius:999px; padding:6px 26px 6px 12px;
+    transition:border-color .15s ease;
+  }
+  .pill i{font-style:normal; font-size:11.5px; letter-spacing:.06em; color:var(--muted)}
+  .pill:hover{border-color:var(--muted)}
+  .pill::after{
+    content:''; position:absolute; right:12px; top:50%;
+    width:5px; height:5px; margin-top:-4px;
+    border-right:1.5px solid var(--muted); border-bottom:1.5px solid var(--muted);
+    transform:rotate(45deg); transition:transform .2s ease;
+  }
+  .pill[aria-expanded="true"]::after{transform:rotate(45deg); margin-top:-6px}
+  .ricon{display:flex; align-items:center; height:26px; color:var(--fg)}
+  .ricon svg{display:block; height:26px; width:auto}
+
+  .rpanel{
+    position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%);
+    z-index:20; display:flex; gap:0; flex-wrap:nowrap; justify-content:center;
+    padding:6px 8px; border:1px solid var(--line); border-radius:14px;
+    background:var(--bg);
+    box-shadow:0 10px 34px color-mix(in srgb, #000 16%, transparent);
+  }
+  .rpanel[hidden]{display:none}
+  .rbtn{
+    appearance:none; cursor:pointer; display:flex; flex-direction:column;
+    align-items:center; gap:6px; padding:8px 5px 6px;
+    border:1px solid transparent; border-radius:10px; background:transparent; color:var(--fg);
+    transition:background .13s ease, border-color .13s ease, transform .08s ease;
+  }
+  /* 记号统一缩到同一高度，窄按钮也能一行排下 8 个 */
+  .rbtn svg{height:26px; width:auto}
+  .rbtn:hover{background:color-mix(in srgb, var(--fg) 5%, transparent)}
+  .rbtn:active{transform:scale(.97)}
+  /* 图标本身是黑/白，选中态靠底色和描边区分，不能靠染色 */
+  .rbtn.on{border-color:var(--fg); background:color-mix(in srgb, var(--fg) 9%, transparent)}
+  .rbtn span{font-size:10.5px; letter-spacing:.02em; color:var(--muted); white-space:nowrap}
+  .rbtn.on span{color:var(--fg); font-weight:500}
+
+  /* ---------- 一次性提示 ---------- */
+  .hint{
+    position:fixed; left:0; right:0; bottom:26px; text-align:center;
+    margin:0; padding:0 var(--pad);
+    font-size:11.5px; letter-spacing:.06em; color:var(--muted);
+    opacity:0; transition:opacity .7s ease; pointer-events:none;
+  }
+  .hint.show{opacity:.6}
+
+  @media (max-width:520px){
+    .f i{display:none}          /* 窄屏靠选框自身内容，不靠标签 */
+    .settings{gap:8px}
+  }
+</style>
+</head>
+<body>
+<main id="app">
+  <div class="stage">
+    <input id="bpm" type="text" size="3" inputmode="numeric" autocomplete="off" spellcheck="false"
+           role="spinbutton" aria-label="速度 BPM，点按可直接输入数字"
+           aria-valuemin="20" aria-valuemax="300" aria-valuenow="120" value="120">
+    <input type="range" id="bpmSlider" min="20" max="300" step="1" value="120" aria-label="速度滑块">
+    <div class="bar" id="bar"></div>
+  </div>
+
+  <div class="dots" id="dots"></div>
+
+  <button class="play" id="play" data-on="0">播放</button>
+
+  <div class="settings">
+    <span class="f"><i>拍号</i><select id="sig" aria-label="拍号"></select></span>
+    <span class="f"><i>预备</i><select id="countin" aria-label="预备拍小节数"></select></span>
+    <span class="rhythm">
+      <button class="pill" id="rhythmBtn" aria-expanded="false" aria-controls="rpanel">
+        <i>节奏型</i><span class="ricon" id="rhythmIcon"></span>
+      </button>
+      <span class="rpanel" id="rpanel" role="group" aria-label="节奏型" hidden></span>
+    </span>
+    <button class="chip" id="tap">打拍</button>
+  </div>
+
+  <p class="hint" id="hint">点数字输入速度，节奏型可展开选择每拍内部的击打</p>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const SIGS = [
+    { label:'2/4', beats:2 }, { label:'3/4', beats:3 }, { label:'4/4', beats:4 },
+    { label:'5/4', beats:5 }, { label:'6/8', beats:6 }, { label:'7/8', beats:7 },
+    { label:'9/8', beats:9 }, { label:'12/8', beats:12 },
+  ];
+  const COUNTINS = [0, 1, 2, 4];
+  const SLOTS = 24;             // 每拍 24 格，可同时表达十六分(每6格)与三连音(每8格)
+
+  // 节奏型：hits = 击打所在的格，beams = 该音的符尾数(0/1/2)，dots = 是否附点
+  const RHYTHMS = [
+    { name:'四分',       hits:[0],            beams:[0],       dots:[0] },
+    { name:'八分',       hits:[0,12],         beams:[1,1],     dots:[0,0] },
+    { name:'十六分',     hits:[0,6,12,18],    beams:[2,2,2,2], dots:[0,0,0,0] },
+    { name:'附点',       hits:[0,18],         beams:[1,2],     dots:[1,0] },
+    { name:'反拍',       hits:[0,6],          beams:[2,1],     dots:[0,1] },
+    { name:'前八后十六', hits:[0,12,18],       beams:[1,2,2],   dots:[1,0,0] },
+    { name:'八分三连',   hits:[0,8,16],       beams:[1,1,1],   dots:[0,0,0], triplet:true },
+    { name:'十六分三连', hits:[0,4,8,12,16,20], beams:[2,2,2,2,2,2], dots:[0,0,0,0,0,0], triplet:true },
+  ];
+  const bitsOf = r => { const b = new Array(SLOTS).fill(0); for (const s of r.hits) b[s] = 1; return b; };
+
+  // 手绘乐谱记号（符头/符干/符尾/附点/三连音数）。图标库没有乐谱字形，只能自己画
+  function noteIcon(r){
+    const n = r.hits.length;
+    // 记号宽度按音符数给，但设上限，否则六个符头的十六分三连会把面板撑到换行
+    const W = Math.min(20 + n * 13, 62), H = 32;
+    const headY = 23, rx = 4.2, ry = 3.1, top = 7;
+    const span = (W - 14) / Math.max(1, n - 1);
+    const xs = r.hits.map((_, i) => n === 1 ? (W - 9) / 2 : 8 + i * span);
+    const stemX = x => x + rx - 0.6;
+    const f = v => (+v).toFixed(1);
+    let s = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true" focusable="false">`;
+    for (let i = 0; i < n; i++){                            // 符干
+      s += `<line x1="${f(stemX(xs[i]))}" y1="${headY - 1}" x2="${f(stemX(xs[i]))}" y2="${top}" stroke="currentColor" stroke-width="1.2"/>`;
+    }
+    for (let i = 0; i < n - 1; i++){                        // 连接相邻符干的符尾
+      const lv = Math.min(r.beams[i], r.beams[i + 1]);
+      if (lv < 1) continue;
+      const x1 = stemX(xs[i]), x2 = stemX(xs[i + 1]), w = x2 - x1;
+      s += `<rect x="${f(x1)}" y="${top}" width="${f(w)}" height="2.7" fill="currentColor"/>`;
+      if (lv >= 2) s += `<rect x="${f(x1)}" y="${top + 3.8}" width="${f(w)}" height="2.7" fill="currentColor"/>`;
+    }
+    xs.forEach((x, i) => {                                  // 符头 + 附点
+      s += `<ellipse cx="${f(x)}" cy="${headY}" rx="${rx}" ry="${ry}" fill="currentColor" transform="rotate(-18 ${f(x)} ${headY})"/>`;
+      if (r.dots[i]) s += `<circle cx="${f(x + rx + 3.1)}" cy="${headY - 1}" r="1.6" fill="currentColor"/>`;
+    });
+    if (r.triplet) s += `<text x="${f(W/2)}" y="${top - 1}" text-anchor="middle" font-size="9" fill="currentColor">3</text>`;
+    return s + '</svg>';
+  }
+
+  const MIN_BPM = 20, MAX_BPM = 300;
+  const LOOKAHEAD_MS = 25;      // 调度器轮询间隔
+  const AHEAD_SEC = 0.12;       // 提前量：节拍在 120ms 前就排进音频时钟
+  const MASTER = 1;               // 各拍峰值已按规格算好，总线只做直通
+
+  /* ---------------- 设置与持久化 ---------------- */
+  const DEFAULTS = { bpm:120, sig:2, accented:[1,0,0,0], countIn:1, rhythm:0 };
+  const LS_KEY = 'metronome.v1';
+  const HINT_KEY = 'metronome.hint.v1';
+
+  const state = Object.assign({}, DEFAULTS, readSettings());
+  function readSettings(){ try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } }
+  function save(){
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        bpm:state.bpm, sig:state.sig, accented:state.accented,
+        countIn:state.countIn, rhythm:state.rhythm,
+      }));
+    } catch { /* 隐私模式下忽略 */ }
+  }
+
+  /* ---------------- DOM ---------------- */
+  const $ = id => document.getElementById(id);
+  const el = {
+    app:$('app'), bpm:$('bpm'), slider:$('bpmSlider'), bar:$('bar'),
+    dots:$('dots'), play:$('play'), sig:$('sig'), countin:$('countin'), tap:$('tap'),
+    rhythmBtn:$('rhythmBtn'), rhythmIcon:$('rhythmIcon'), rpanel:$('rpanel'), hint:$('hint'),
+  };
+
+  /* ---------------- 播放引擎状态 ---------------- */
+  let ctx = null, master = null;
+  let ticker = null, rafId = 0;
+  let nextTickTime = 0, tickInBar = 0, bar = 0, countBar = 0, phase = 'idle';
+  let visualQueue = [];
+  let wakeLock = null;
+
+  const sig = () => SIGS[state.sig];
+  const ticksPerBar = () => sig().beats * SLOTS;
+  const secPerTick = () => 60 / state.bpm / SLOTS;
+  const clamp = v => Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(v)));
+
+  let pattern = new Array(SLOTS).fill(0);       // 当前节奏型展开成 24 格击打位置
+  function applyRhythm(){ pattern = bitsOf(RHYTHMS[state.rhythm]); }
+
+  /* ---------------- 声音 ---------------- */
+  function ensureAudio(){
+    if (ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = MASTER;      // 各拍峰值已按规格算好，总线只做直通
+    master.connect(ctx.destination);
+  }
+
+  // 电子节拍器：固定音高的短滴声，柔和起落，重拍略高且更响。
+  const clickBuffers = new Map();
+  function makeClickBuffer(accent, sub){
+    const key = sub ? 'sub' : accent ? 'accent' : 'normal';
+    if (clickBuffers.has(key)) return clickBuffers.get(key);
+    const rate = ctx.sampleRate;
+    const duration = sub ? 0.028 : 0.040;
+    const buffer = ctx.createBuffer(1, Math.ceil(rate * duration), rate);
+    const data = buffer.getChannelData(0);
+    const frequency = accent && !sub ? 1500 : 1100;
+    let peak = 0;
+    for (let i = 0; i < data.length; i++){
+      const t = i / rate;
+      const attack = Math.min(1, t / 0.0012);
+      const release = Math.min(1, (data.length - 1 - i) / (rate * 0.006));
+      const envelope = attack * release * Math.exp(-t / 0.014);
+      const phase = 2 * Math.PI * frequency * t;
+      data[i] = (Math.sin(phase) + 0.10 * Math.sin(2 * phase)) * envelope;
+      peak = Math.max(peak, Math.abs(data[i]));
+    }
+    const level = sub ? 0.18 : accent ? 0.43 : 0.32;
+    for (let i = 0; i < data.length; i++) data[i] *= level / (peak || 1);
+    clickBuffers.set(key, buffer);
+    return buffer;
+  }
+
+  function click(time, accent, sub){
+    const source = ctx.createBufferSource();
+    source.buffer = makeClickBuffer(accent, sub);
+    source.connect(master);
+    source.onended = () => source.disconnect();
+    source.start(time);
+  }
+  /* ---------------- 调度 ---------------- */
+  // 用 Worker 计时，避免后台标签页把 setInterval 降频到 1Hz 而打乱节奏
+  function startTicker(fn){
+    stopTicker();
+    try {
+      const src = `onmessage=()=>postMessage(0);setInterval(()=>postMessage(0),${LOOKAHEAD_MS});`;
+      const w = new Worker(URL.createObjectURL(new Blob([src], { type:'text/javascript' })));
+      w.onmessage = fn;
+      ticker = () => w.terminate();
+    } catch {
+      const id = setInterval(fn, LOOKAHEAD_MS);
+      ticker = () => clearInterval(id);
+    }
+  }
+  function stopTicker(){ if (ticker){ ticker(); ticker = null; } }
+
+  function scheduleTick(t, time){
+    if (t % SLOTS !== 0){
+      if (pattern[t % SLOTS]) click(time, false, true);   // 该格无击打则不出声
+      return;
+    }
+    const beatIdx = t / SLOTS;
+    click(time, state.accented[beatIdx] === 1, false);
+    visualQueue.push({
+      time, beatIdx,
+      label: phase === 'countin' ? `预备 ${countBar + 1}/${state.countIn}` : `小节 ${bar}`,
+    });
+  }
+
+  function advance(){
+    nextTickTime += secPerTick();
+    tickInBar++;
+    if (tickInBar >= ticksPerBar()){
+      tickInBar = 0;
+      if (phase === 'countin'){
+        countBar++;
+        if (countBar >= state.countIn){ phase = 'running'; bar = 1; countBar = 0; }
+      } else {
+        bar++;
+      }
+    }
+  }
+
+  function pump(){
+    if (!ctx) return;
+    while (nextTickTime < ctx.currentTime + AHEAD_SEC){
+      scheduleTick(tickInBar, nextTickTime);
+      advance();
+    }
+  }
+
+  // 视觉事件按音频时钟消费。卡顿积压的旧帧只补最后一帧，避免回前台时快速闪一遍
+  function frame(){
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    let caughtUp = null;
+    while (visualQueue.length && visualQueue[0].time <= now + 0.004){
+      const e = visualQueue.shift();
+      if (now - e.time > 0.25) caughtUp = e;
+      else { paint(e); caughtUp = null; }
+    }
+    if (caughtUp) paint(caughtUp);
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ---------------- 播放控制 ---------------- */
+  async function start(){
+    ensureAudio();
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    tickInBar = 0; bar = 1; countBar = 0;
+    phase = state.countIn > 0 ? 'countin' : 'running';
+    nextTickTime = ctx.currentTime + 0.09;
+    visualQueue.length = 0;
+
+    startTicker(pump);
+    pump();
+    if (!rafId) rafId = requestAnimationFrame(frame);
+
+    el.play.dataset.on = '1';
+    el.play.textContent = '暂停';
+    requestWake();
+  }
+
+  function stop(){
+    stopTicker();
+    if (rafId){ cancelAnimationFrame(rafId); rafId = 0; }
+    if (ctx) ctx.suspend();
+    visualQueue.length = 0;
+    phase = 'idle'; bar = 0; countBar = 0;
+    el.bar.textContent = '';
+    setActiveDot(-1);
+    el.play.dataset.on = '0';
+    el.play.textContent = '播放';
+    releaseWake();
+  }
+
+  const isPlaying = () => phase !== 'idle';
+  const toggle = () => (isPlaying() ? stop() : start());
+
+  async function requestWake(){
+    try { if ('wakeLock' in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  function releaseWake(){
+    try { wakeLock && wakeLock.release(); } catch {}
+    wakeLock = null;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (isPlaying() && !document.hidden) requestWake();
+  });
+
+  /* ---------------- 渲染 ---------------- */
+  function renderDots(){
+    const n = sig().beats;
+    if (el.dots.children.length !== n) el.dots.innerHTML = '';
+    for (let i = 0; i < n; i++){
+      let d = el.dots.children[i];
+      if (!d){
+        d = document.createElement('button');
+        d.className = 'dot';
+        d.type = 'button';
+        d.setAttribute('aria-label', `第 ${i + 1} 拍，重音开关`);
+        d.addEventListener('click', () => toggleAccent(i));
+        el.dots.appendChild(d);
+      }
+      d.classList.toggle('acc', state.accented[i] === 1);
+    }
+  }
+
+  function toggleAccent(i){
+    if (i === 0){ state.accented[0] = 1; renderDots(); save(); return; } // 第一拍恒为重音
+    state.accented[i] = state.accented[i] === 1 ? 0 : 1;
+    renderDots(); save();
+  }
+
+  let activeDot = -1;
+  function setActiveDot(i){
+    if (activeDot === i) return;
+    if (el.dots.children[activeDot]) el.dots.children[activeDot].classList.remove('on');
+    activeDot = i;
+    if (i >= 0 && el.dots.children[i]) el.dots.children[i].classList.add('on');
+  }
+
+  function paint(e){
+    setActiveDot(e.beatIdx);
+    el.bar.textContent = e.label;
+  }
+
+  function renderRhythm(){
+    el.rhythmIcon.innerHTML = noteIcon(RHYTHMS[state.rhythm]);
+    el.rhythmBtn.setAttribute('aria-label', `节奏型，当前 ${RHYTHMS[state.rhythm].name}`);
+    [...el.rpanel.children].forEach((b, i) => b.classList.toggle('on', i === state.rhythm));
+  }
+
+  function buildRhythm(){
+    RHYTHMS.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.className = 'rbtn';
+      b.type = 'button';
+      b.innerHTML = noteIcon(r) + `<span>${r.name}</span>`;
+      b.setAttribute('aria-label', `节奏型 ${r.name}`);
+      b.addEventListener('click', () => {
+        state.rhythm = i;
+        applyRhythm();
+        renderRhythm();
+        save();
+        setPanel(false);
+      });
+      el.rpanel.appendChild(b);
+    });
+  }
+
+  function setPanel(open){
+    el.rpanel.hidden = !open;
+    el.rhythmBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  function render(){
+    el.bpm.value = state.bpm;
+    el.slider.value = state.bpm;
+    el.bpm.setAttribute('aria-valuenow', state.bpm);
+    el.sig.value = state.sig;
+    el.countin.value = state.countIn;
+    renderDots();
+    renderRhythm();
+  }
+
+  function setBpm(v){
+    const next = clamp(v);
+    if (next === state.bpm) return;
+    state.bpm = next;
+    el.bpm.value = next;
+    el.slider.value = next;      // 滑块跟随数字，所有调速路径都经由这里
+    el.bpm.setAttribute('aria-valuenow', next);
+    save();
+  }
+
+  function setMeter(){
+    const n = sig().beats;
+    const next = state.accented.slice(0, n);
+    while (next.length < n) next.push(0);
+    next[0] = 1;
+    state.accented = next;
+    tickInBar = Math.min(tickInBar, ticksPerBar() - 1);
+    if (activeDot >= n) setActiveDot(-1);
+    renderDots();
+    save();
+  }
+
+  /* ---------------- 打拍测速 ---------------- */
+  let taps = [], tapTimer = 0;
+  function tapTempo(){
+    const t = performance.now();
+    if (taps.length && t - taps[taps.length - 1] > 2500) taps = [];
+    taps.push(t);
+    if (taps.length > 6) taps.shift();
+    if (taps.length < 2){ el.tap.textContent = '打拍…'; return; }
+    const span = taps[taps.length - 1] - taps[0];
+    setBpm(60000 / (span / (taps.length - 1)));
+    el.tap.textContent = state.bpm;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => (el.tap.textContent = '打拍'), 900);
+  }
+
+  /* ---------------- 交互 ---------------- */
+  el.play.addEventListener('click', toggle);
+  el.tap.addEventListener('click', tapTempo);
+
+  el.sig.addEventListener('change', () => { state.sig = +el.sig.value; setMeter(); save(); });
+  el.countin.addEventListener('change', () => { state.countIn = +el.countin.value; save(); });
+
+  el.rhythmBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    setPanel(el.rpanel.hidden);
+  });
+  el.rpanel.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => setPanel(false));
+
+  // 调速：点数字直接输入 / 滚轮微调 / 方向键细调
+  let editing = false;
+
+  function commitBpm(raw){
+    const digits = String(raw).replace(/[^0-9]/g, '');
+    if (digits === ''){ el.bpm.value = state.bpm; return; }
+    setBpm(parseInt(digits, 10));
+    el.bpm.value = state.bpm;          // 越界时回写钳制后的实际值
+  }
+
+  el.bpm.addEventListener('focus', () => { editing = true; el.bpm.select(); });
+  el.bpm.addEventListener('blur', () => { editing = false; commitBpm(el.bpm.value); });
+
+  el.bpm.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); el.bpm.blur(); return; }
+    if (e.key === 'Escape'){ e.preventDefault(); el.bpm.value = state.bpm; el.bpm.blur(); return; }
+    if (e.code !== 'ArrowUp' && e.code !== 'ArrowDown') return;
+    e.preventDefault();
+    const step = e.shiftKey ? 5 : 1;
+    setBpm(state.bpm + (e.code === 'ArrowUp' ? step : -step));
+    el.bpm.value = state.bpm;
+    el.bpm.select();
+  });
+
+  el.bpm.addEventListener('wheel', e => {
+    e.preventDefault();
+    setBpm(state.bpm + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 5 : 1));
+    if (!editing) el.bpm.value = state.bpm;
+  }, { passive:false });
+
+  // 滑块拖动实时生效
+  el.slider.addEventListener('input', () => setBpm(+el.slider.value));
+  el.slider.addEventListener('keydown', e => {
+    if (!e.shiftKey) return;                     // 不按 Shift 时用原生步进 1
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowDown'){ e.preventDefault(); setBpm(state.bpm - 5); }
+    else if (e.code === 'ArrowRight' || e.code === 'ArrowUp'){ e.preventDefault(); setBpm(state.bpm + 5); }
+  });
+
+  function isTyping(t){
+    return t && (t.tagName === 'SELECT' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (isTyping(e.target)) return;
+    switch (e.code){
+      case 'Space': e.preventDefault(); toggle(); break;
+      case 'ArrowRight': case 'ArrowUp':
+        e.preventDefault(); setBpm(state.bpm + (e.shiftKey ? 5 : 1)); break;
+      case 'ArrowLeft': case 'ArrowDown':
+        e.preventDefault(); setBpm(state.bpm - (e.shiftKey ? 5 : 1)); break;
+      case 'KeyT': tapTempo(); break;
+      case 'KeyF':
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen?.().catch(() => {});
+        break;
+      case 'KeyR': if (isPlaying()){ stop(); start(); } else { taps = []; } break;
+      case 'Escape': if (!el.rpanel.hidden) setPanel(false); else if (isPlaying()) stop(); break;
+    }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    el.app.classList.toggle('fs', !!document.fullscreenElement);
+  });
+
+  /* ---------------- 初始化 ---------------- */
+  SIGS.forEach((s, i) => el.sig.add(new Option(s.label, i)));
+  COUNTINS.forEach(n => el.countin.add(new Option(n === 0 ? '关' : n + ' 小节', n)));
+  state.sig = Math.min(SIGS.length - 1, Math.max(0, state.sig | 0));
+  state.countIn = COUNTINS.includes(state.countIn) ? state.countIn : 1;
+  state.rhythm = Number.isInteger(state.rhythm) && RHYTHMS[state.rhythm] ? state.rhythm : 0;
+  applyRhythm();
+  buildRhythm();
+  setMeter();
+  render();
+
+  // 首次提示：只出现一次，4 秒后淡出
+  if (!localStorage.getItem(HINT_KEY)){
+    try { localStorage.setItem(HINT_KEY, '1'); } catch {}
+    el.hint.classList.add('show');
+    setTimeout(() => el.hint.classList.remove('show'), 4000);
+  }
+})();
+</script>
+</body>
+</html>
